@@ -1,6 +1,9 @@
 # Ignore macOS system files
 .DS_Store
 
+# Ignore cloude storage synchronization files
+*.ini
+
 # Ignore Python compiled files
 __pycache__/
 *.py[cod]
