@@ -1,13 +1,6 @@
 #!/usr/bin/env node
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
+import * as dotenv from "dotenv";
+dotenv.config();
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
@@ -129,61 +122,59 @@ if (!PERPLEXITY_API_KEY) {
  * @returns {Promise<string>} The chat completion result with appended citations.
  * @throws Will throw an error if the API request fails.
  */
-function performChatCompletion(messages_1) {
-    return __awaiter(this, arguments, void 0, function* (messages, model = "sonar-pro") {
-        // Construct the API endpoint URL and request body
-        const url = new URL("https://api.perplexity.ai/chat/completions");
-        const body = {
-            model: model, // Model identifier passed as parameter
-            messages: messages,
-            // Additional parameters can be added here if required (e.g., max_tokens, temperature, etc.)
-            // See the Sonar API documentation for more details: 
-            // https://docs.perplexity.ai/api-reference/chat-completions
-        };
-        let response;
+async function performChatCompletion(messages, model = "sonar-pro") {
+    // Construct the API endpoint URL and request body
+    const url = new URL("https://api.perplexity.ai/chat/completions");
+    const body = {
+        model: model, // Model identifier passed as parameter
+        messages: messages,
+        // Additional parameters can be added here if required (e.g., max_tokens, temperature, etc.)
+        // See the Sonar API documentation for more details: 
+        // https://docs.perplexity.ai/api-reference/chat-completions
+    };
+    let response;
+    try {
+        response = await fetch(url.toString(), {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
+            },
+            body: JSON.stringify(body),
+        });
+    }
+    catch (error) {
+        throw new Error(`Network error while calling Perplexity API: ${error}`);
+    }
+    // Check for non-successful HTTP status
+    if (!response.ok) {
+        let errorText;
         try {
-            response = yield fetch(url.toString(), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
-                },
-                body: JSON.stringify(body),
-            });
+            errorText = await response.text();
         }
-        catch (error) {
-            throw new Error(`Network error while calling Perplexity API: ${error}`);
+        catch (parseError) {
+            errorText = "Unable to parse error response";
         }
-        // Check for non-successful HTTP status
-        if (!response.ok) {
-            let errorText;
-            try {
-                errorText = yield response.text();
-            }
-            catch (parseError) {
-                errorText = "Unable to parse error response";
-            }
-            throw new Error(`Perplexity API error: ${response.status} ${response.statusText}\n${errorText}`);
-        }
-        // Attempt to parse the JSON response from the API
-        let data;
-        try {
-            data = yield response.json();
-        }
-        catch (jsonError) {
-            throw new Error(`Failed to parse JSON response from Perplexity API: ${jsonError}`);
-        }
-        // Directly retrieve the main message content from the response 
-        let messageContent = data.choices[0].message.content;
-        // If citations are provided, append them to the message content
-        if (data.citations && Array.isArray(data.citations) && data.citations.length > 0) {
-            messageContent += "\n\nCitations:\n";
-            data.citations.forEach((citation, index) => {
-                messageContent += `[${index + 1}] ${citation}\n`;
-            });
-        }
-        return messageContent;
-    });
+        throw new Error(`Perplexity API error: ${response.status} ${response.statusText}\n${errorText}`);
+    }
+    // Attempt to parse the JSON response from the API
+    let data;
+    try {
+        data = await response.json();
+    }
+    catch (jsonError) {
+        throw new Error(`Failed to parse JSON response from Perplexity API: ${jsonError}`);
+    }
+    // Directly retrieve the main message content from the response 
+    let messageContent = data.choices[0].message.content;
+    // If citations are provided, append them to the message content
+    if (data.citations && Array.isArray(data.citations) && data.citations.length > 0) {
+        messageContent += "\n\nCitations:\n";
+        data.citations.forEach((citation, index) => {
+            messageContent += `[${index + 1}] ${citation}\n`;
+        });
+    }
+    return messageContent;
 }
 // Initialize the server with tool metadata and capabilities
 const server = new Server({
@@ -198,10 +189,8 @@ const server = new Server({
  * Registers a handler for listing available tools.
  * When the client requests a list of tools, this handler returns all available Perplexity tools.
  */
-server.setRequestHandler(ListToolsRequestSchema, () => __awaiter(void 0, void 0, void 0, function* () {
-    return ({
-        tools: [PERPLEXITY_ASK_TOOL, PERPLEXITY_RESEARCH_TOOL, PERPLEXITY_REASON_TOOL],
-    });
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [PERPLEXITY_ASK_TOOL, PERPLEXITY_RESEARCH_TOOL, PERPLEXITY_REASON_TOOL],
 }));
 /**
  * Registers a handler for calling a specific tool.
@@ -210,7 +199,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => __awaiter(void 0, void 0,
  * @param {object} request - The incoming tool call request.
  * @returns {Promise<object>} The response containing the tool's result or an error.
  */
-server.setRequestHandler(CallToolRequestSchema, (request) => __awaiter(void 0, void 0, void 0, function* () {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
         const { name, arguments: args } = request.params;
         if (!args) {
@@ -223,7 +212,7 @@ server.setRequestHandler(CallToolRequestSchema, (request) => __awaiter(void 0, v
                 }
                 // Invoke the chat completion function with the provided messages
                 const messages = args.messages;
-                const result = yield performChatCompletion(messages, "sonar-pro");
+                const result = await performChatCompletion(messages, "sonar-pro");
                 return {
                     content: [{ type: "text", text: result }],
                     isError: false,
@@ -235,7 +224,7 @@ server.setRequestHandler(CallToolRequestSchema, (request) => __awaiter(void 0, v
                 }
                 // Invoke the chat completion function with the provided messages using the deep research model
                 const messages = args.messages;
-                const result = yield performChatCompletion(messages, "sonar-deep-research");
+                const result = await performChatCompletion(messages, "sonar-deep-research");
                 return {
                     content: [{ type: "text", text: result }],
                     isError: false,
@@ -247,7 +236,7 @@ server.setRequestHandler(CallToolRequestSchema, (request) => __awaiter(void 0, v
                 }
                 // Invoke the chat completion function with the provided messages using the reasoning model
                 const messages = args.messages;
-                const result = yield performChatCompletion(messages, "sonar-reasoning-pro");
+                const result = await performChatCompletion(messages, "sonar-reasoning-pro");
                 return {
                     content: [{ type: "text", text: result }],
                     isError: false,
@@ -273,23 +262,21 @@ server.setRequestHandler(CallToolRequestSchema, (request) => __awaiter(void 0, v
             isError: true,
         };
     }
-}));
+});
 /**
  * Initializes and runs the server using standard I/O for communication.
  * Logs an error and exits if the server fails to start.
  */
-function runServer() {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const transport = new StdioServerTransport();
-            yield server.connect(transport);
-            console.error("Perplexity MCP Server running on stdio with Ask, Research, and Reason tools");
-        }
-        catch (error) {
-            console.error("Fatal error running server:", error);
-            process.exit(1);
-        }
-    });
+async function runServer() {
+    try {
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+        console.error("Perplexity MCP Server running on stdio with Ask, Research, and Reason tools");
+    }
+    catch (error) {
+        console.error("Fatal error running server:", error);
+        process.exit(1);
+    }
 }
 // Start the server and catch any startup errors
 runServer().catch((error) => {
